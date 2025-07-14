@@ -12,12 +12,16 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
 
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.*;
 
@@ -26,7 +30,6 @@ public class AppDrawerActivity extends AppCompatActivity {
     private List<AppInfo> allApps = new ArrayList<>();
     private List<AppInfo> recentApps = new ArrayList<>();
     private AppListAdapter adapter;
-    private GridView appGrid;
     private SearchView searchView;
     private InputMethodManager imm;
 
@@ -35,11 +38,11 @@ public class AppDrawerActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_app_drawer);
 
-        appGrid = findViewById(R.id.app_grid);
+        RecyclerView allAppsRecycler = findViewById(R.id.all_apps_recycler);
         searchView = findViewById(R.id.search_view);
         imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
 
-        // Remove underline bg
+        // Remove underline from SearchView
         int plateId = searchView.getContext().getResources()
                 .getIdentifier("android:id/search_plate", null, null);
         View searchPlate = searchView.findViewById(plateId);
@@ -47,40 +50,37 @@ public class AppDrawerActivity extends AppCompatActivity {
             searchPlate.setBackgroundColor(Color.TRANSPARENT);
         }
 
-        // Permission
         requestUsageAccessPermission();
-
-        // Load data
         loadApps();
         loadRecentApps();
 
         adapter = new AppListAdapter(this, allApps);
-        appGrid.setAdapter(adapter);
+        allAppsRecycler.setLayoutManager(new GridLayoutManager(this, 4)); // 4 columns
+        allAppsRecycler.setAdapter(adapter);
 
-        // All Apps click
-        appGrid.setOnItemClickListener((parent, view, position, id) -> {
-            AppInfo app = (AppInfo) adapter.getItem(position);
-            if (app != null) {
-                Intent intent = getPackageManager().getLaunchIntentForPackage(app.packageName);
-                if (intent != null) startActivity(intent);
-            }
-        });
-
-        // Search filtering
         searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override public boolean onQueryTextSubmit(String query) { return false; }
 
             @Override
             public boolean onQueryTextChange(String newText) {
                 adapter.filter(newText.toLowerCase(Locale.ROOT));
+
+                List<AppInfo> filtered = adapter.getFilteredList();
+                if (filtered.size() == 1) {
+                    AppInfo matchedApp = filtered.get(0);
+                    showShortcutCard(matchedApp);
+                    showSearchWithRow(matchedApp.label);
+                } else {
+                    findViewById(R.id.shortcut_card).setVisibility(View.GONE);
+                    findViewById(R.id.search_with_label).setVisibility(View.GONE);
+                    findViewById(R.id.search_with_row).setVisibility(View.GONE);
+                }
                 return true;
             }
         });
 
-        // Load recent into horizontal row
         LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
         loadRecentAppsIntoView(recentContainer);
-
         focusSearchBar();
     }
 
@@ -96,6 +96,9 @@ public class AppDrawerActivity extends AppCompatActivity {
             Drawable icon = info.loadIcon(pm);
             allApps.add(new AppInfo(label, icon, packageName));
         }
+
+        // Sort A-Z
+        Collections.sort(allApps, Comparator.comparing(app -> app.label.toLowerCase(Locale.ROOT)));
     }
 
     private void loadRecentApps() {
@@ -164,6 +167,103 @@ public class AppDrawerActivity extends AppCompatActivity {
 
             container.addView(itemLayout);
         }
+    }
+
+    private void showShortcutCard(AppInfo app) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return;
+
+        LauncherApps launcherApps = (LauncherApps) getSystemService(LAUNCHER_APPS_SERVICE);
+        List<ShortcutInfo> shortcuts = new ArrayList<>();
+
+        try {
+            shortcuts = launcherApps.getShortcuts(
+                    new LauncherApps.ShortcutQuery()
+                            .setPackage(app.packageName)
+                            .setQueryFlags(
+                                    LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC |
+                                            LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST |
+                                            LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+                            ),
+                    android.os.Process.myUserHandle()
+            );
+        } catch (SecurityException e) {
+            Log.e("SAFLauncher", "No permission for shortcuts", e);
+            Toast.makeText(this, "Set as default launcher to enable shortcuts", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        LinearLayout card = findViewById(R.id.shortcut_card);
+        card.removeAllViews();
+
+        if (shortcuts == null || shortcuts.isEmpty()) {
+            card.setVisibility(View.GONE);
+            return;
+        }
+
+        card.setVisibility(View.VISIBLE);
+
+        for (ShortcutInfo s : shortcuts) {
+            CharSequence label = s.getShortLabel();
+            Intent intent = s.getIntent();
+            Drawable icon = launcherApps.getShortcutIconDrawable(s, getResources().getDisplayMetrics().densityDpi);
+
+            if (label != null) {
+                Button btn = new Button(this);
+                btn.setText(app.label + ": " + label);
+                btn.setAllCaps(false);
+                btn.setPadding(20, 10, 20, 10);
+                btn.setTextColor(Color.WHITE);
+                btn.setBackgroundColor(Color.TRANSPARENT);
+
+                if (icon != null) {
+                    btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
+                }
+
+                btn.setOnClickListener(v -> {
+                    if (intent != null) startActivity(intent);
+                });
+
+                card.addView(btn);
+            }
+        }
+    }
+
+    private void showSearchWithRow(String query) {
+        LinearLayout row = findViewById(R.id.search_with_row);
+        TextView label = findViewById(R.id.search_with_label);
+        row.removeAllViews();
+
+        String[] searchTargets = {"Google", "Play", "YouTube", "Wikipedia"};
+        int[] icons = {
+//                R.drawable.ic_google, R.drawable.ic_playstore,
+//                R.drawable.ic_youtube, R.drawable.ic_wikipedia
+        };
+        String[] urls = {
+                "https://www.google.com/search?q=",
+                "https://play.google.com/store/search?q=",
+                "https://www.youtube.com/results?search_query=",
+                "https://en.wikipedia.org/wiki/Special:Search/"
+        };
+
+        for (int i = 0; i < searchTargets.length; i++) {
+            ImageView icon = new ImageView(this);
+            // icon.setImageResource(icons[i]); // Enable when you have drawable icons
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(100, 100);
+            params.setMargins(12, 0, 12, 0);
+            icon.setLayoutParams(params);
+            int finalI = i;
+
+            icon.setOnClickListener(v -> {
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setData(android.net.Uri.parse(urls[finalI] + query));
+                startActivity(intent);
+            });
+
+            row.addView(icon);
+        }
+
+        label.setVisibility(View.VISIBLE);
+        row.setVisibility(View.VISIBLE);
     }
 
     private void requestUsageAccessPermission() {

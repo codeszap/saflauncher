@@ -9,15 +9,16 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
-import android.widget.ImageView;
-import android.widget.TextView;
-import android.app.AlertDialog;
+import android.widget.*;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public class AppListAdapter extends BaseAdapter {
+public class AppListAdapter extends RecyclerView.Adapter<AppListAdapter.ViewHolder> {
 
     private final Context context;
     private final List<AppInfo> originalApps;
@@ -29,39 +30,25 @@ public class AppListAdapter extends BaseAdapter {
         this.filteredApps = new ArrayList<>(apps);
     }
 
-    @Override
-    public int getCount() {
-        return filteredApps.size();
-    }
-
-    @Override
-    public Object getItem(int position) {
-        return filteredApps.get(position);
-    }
-
-    @Override
-    public long getItemId(int position) {
-        return position;
-    }
     public List<AppInfo> getFilteredList() {
         return filteredApps;
     }
 
+    @NonNull
     @Override
-    public View getView(int position, View convertView, ViewGroup parent) {
+    public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(context).inflate(R.layout.item_app_icon, parent, false);
+        return new ViewHolder(view);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         AppInfo app = filteredApps.get(position);
 
-        if (convertView == null) {
-            convertView = LayoutInflater.from(context).inflate(R.layout.item_app_icon, parent, false);
-        }
+        holder.iconView.setImageDrawable(app.icon);
+        holder.labelView.setText(app.label);
 
-        ImageView icon = convertView.findViewById(R.id.app_icon);
-        TextView name = convertView.findViewById(R.id.app_name);
-
-        icon.setImageDrawable(app.icon);
-        name.setText(app.label);
-
-        convertView.setOnClickListener(v -> {
+        holder.itemView.setOnClickListener(v -> {
             Intent launchIntent = context.getPackageManager()
                     .getLaunchIntentForPackage(app.packageName);
             if (launchIntent != null) {
@@ -69,12 +56,12 @@ public class AppListAdapter extends BaseAdapter {
             }
         });
 
-        convertView.setOnLongClickListener(v -> {
+        holder.itemView.setOnLongClickListener(v -> {
             showAppOptions(app);
             return true;
         });
 
-        convertView.setOnTouchListener(new View.OnTouchListener() {
+        holder.itemView.setOnTouchListener(new View.OnTouchListener() {
             private long startTime = 0;
             private boolean dragged = false;
 
@@ -111,8 +98,11 @@ public class AppListAdapter extends BaseAdapter {
                 return false;
             }
         });
+    }
 
-        return convertView;
+    @Override
+    public int getItemCount() {
+        return filteredApps.size();
     }
 
     public void filter(String keyword) {
@@ -160,5 +150,16 @@ public class AppListAdapter extends BaseAdapter {
                             break;
                     }
                 }).show();
+    }
+
+    public static class ViewHolder extends RecyclerView.ViewHolder {
+        ImageView iconView;
+        TextView labelView;
+
+        public ViewHolder(@NonNull View itemView) {
+            super(itemView);
+            iconView = itemView.findViewById(R.id.app_icon);
+            labelView = itemView.findViewById(R.id.app_name);
+        }
     }
 }
