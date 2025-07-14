@@ -10,11 +10,13 @@ import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.UserHandle;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
 
@@ -55,7 +57,7 @@ public class AppDrawerActivity extends AppCompatActivity {
         loadRecentApps();
 
         adapter = new AppListAdapter(this, allApps);
-        allAppsRecycler.setLayoutManager(new GridLayoutManager(this, 4)); // 4 columns
+        allAppsRecycler.setLayoutManager(new GridLayoutManager(this, 5)); // 4 columns
         allAppsRecycler.setAdapter(adapter);
 
         searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
@@ -65,18 +67,35 @@ public class AppDrawerActivity extends AppCompatActivity {
             public boolean onQueryTextChange(String newText) {
                 adapter.filter(newText.toLowerCase(Locale.ROOT));
 
+                // 🔥 Hide/show recent apps and divider based on search text
+                LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
+                View divider = ((ViewGroup) recentContainer.getParent()).findViewById(R.id.recent_divider);
+
+                if (TextUtils.isEmpty(newText.trim())) {
+                    recentContainer.setVisibility(View.VISIBLE);
+                    if (divider != null) divider.setVisibility(View.VISIBLE);
+                } else {
+                    recentContainer.setVisibility(View.GONE);
+                    if (divider != null) divider.setVisibility(View.GONE);
+                }
+
                 List<AppInfo> filtered = adapter.getFilteredList();
                 if (filtered.size() == 1) {
                     AppInfo matchedApp = filtered.get(0);
                     showShortcutCard(matchedApp);
-                    showSearchWithRow(matchedApp.label);
+                    //Hide show google, youtube, etc. search row
+
+                 //   showSearchWithRow(matchedApp.label);
                 } else {
                     findViewById(R.id.shortcut_card).setVisibility(View.GONE);
                     findViewById(R.id.search_with_label).setVisibility(View.GONE);
                     findViewById(R.id.search_with_row).setVisibility(View.GONE);
                 }
+
                 return true;
             }
+
+
         });
 
         LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
@@ -173,6 +192,7 @@ public class AppDrawerActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return;
 
         LauncherApps launcherApps = (LauncherApps) getSystemService(LAUNCHER_APPS_SERVICE);
+        UserHandle userHandle = android.os.Process.myUserHandle();
         List<ShortcutInfo> shortcuts = new ArrayList<>();
 
         try {
@@ -184,7 +204,7 @@ public class AppDrawerActivity extends AppCompatActivity {
                                             LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST |
                                             LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
                             ),
-                    android.os.Process.myUserHandle()
+                    userHandle
             );
         } catch (SecurityException e) {
             Log.e("SAFLauncher", "No permission for shortcuts", e);
@@ -204,26 +224,53 @@ public class AppDrawerActivity extends AppCompatActivity {
 
         for (ShortcutInfo s : shortcuts) {
             CharSequence label = s.getShortLabel();
-            Intent intent = s.getIntent();
             Drawable icon = launcherApps.getShortcutIconDrawable(s, getResources().getDisplayMetrics().densityDpi);
 
             if (label != null) {
-                Button btn = new Button(this);
-                btn.setText(app.label + ": " + label);
-                btn.setAllCaps(false);
-                btn.setPadding(20, 10, 20, 10);
-                btn.setTextColor(Color.WHITE);
-                btn.setBackgroundColor(Color.TRANSPARENT);
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(16, 12, 16, 12);
 
+                ImageView iconView = new ImageView(this);
                 if (icon != null) {
-                    btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
+                    iconView.setImageDrawable(icon);
                 }
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(60, 60);
+                iconParams.setMargins(0, 0, 16, 0);
+                iconView.setLayoutParams(iconParams);
 
-                btn.setOnClickListener(v -> {
-                    if (intent != null) startActivity(intent);
+                TextView labelView = new TextView(this);
+                labelView.setText(label);
+                labelView.setTextColor(Color.WHITE);
+                labelView.setTextSize(14);
+                labelView.setGravity(Gravity.START);
+                labelView.setLayoutParams(new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                ));
+
+                row.addView(iconView);
+                row.addView(labelView);
+
+                // 💥 Launch shortcut using startShortcut
+                row.setOnClickListener(v -> {
+                    try {
+                        launcherApps.startShortcut(
+                                app.packageName,
+                                s.getId(),
+                                null,
+                                null,
+                                userHandle
+                        );
+                    } catch (Exception e) {
+                        Log.e("SAFLauncher", "Failed to launch shortcut: " + s.getId(), e);
+                        Toast.makeText(this, "Unable to launch shortcut", Toast.LENGTH_SHORT).show();
+                    }
                 });
 
-                card.addView(btn);
+                card.addView(row);
             }
         }
     }

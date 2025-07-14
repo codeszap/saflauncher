@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
+import android.os.VibrationEffect;
 import android.provider.Settings;
 import android.view.DragEvent;
 import android.view.MotionEvent;
@@ -22,6 +23,8 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import java.io.FileInputStream;
 import android.Manifest;
+import android.os.Vibrator;
+
 
 public class HomeActivity extends AppCompatActivity {
 
@@ -76,6 +79,19 @@ public class HomeActivity extends AppCompatActivity {
             loadWallpaper();
         }
     }
+
+    private void vibrate() {
+        Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
+
+        if (vibrator != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(android.os.VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                vibrator.vibrate(30); // Deprecated but still works in older Android
+            }
+        }
+    }
+
 
     private void loadWallpaper() {
         try {
@@ -141,6 +157,7 @@ public class HomeActivity extends AppCompatActivity {
 
                 if (!drawerOpened && (y1 - y2 > MIN_DISTANCE)) {
                     drawerOpened = true;
+                    vibrate();
                     openDrawer();
                     return true;
                 }

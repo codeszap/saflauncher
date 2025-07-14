@@ -50,10 +50,12 @@
 
             <!-- Divider -->
             <View
+                android:id="@+id/recent_divider"
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:layout_marginVertical="4dp"
                 android:background="#555" />
+
 
             <!-- 🧱 All Apps Grid -->
             <androidx.recyclerview.widget.RecyclerView
