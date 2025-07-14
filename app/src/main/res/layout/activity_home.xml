@@ -1,0 +1,29 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/home_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <!-- Optional title or center content -->
+<!--    <TextView-->
+<!--        android:id="@+id/home_text"-->
+<!--        android:layout_width="wrap_content"-->
+<!--        android:layout_height="wrap_content"-->
+<!--        android:text="Swipe Up or Tap Drawer Icon"-->
+<!--        android:layout_centerInParent="true"-->
+<!--        android:textSize="18sp"-->
+<!--        android:textColor="#666" />-->
+
+    <!-- Drawer button at bottom center -->
+<!--    <ImageView-->
+<!--        android:id="@+id/btn_drawer"-->
+<!--        android:layout_width="60dp"-->
+<!--        android:layout_height="60dp"-->
+<!--        android:src="@drawable/ic_drawer"-->
+<!--        android:layout_alignParentBottom="true"-->
+<!--        android:layout_centerHorizontal="true"-->
+<!--        android:layout_marginBottom="24dp"-->
+<!--        android:contentDescription="App Drawer"-->
+<!--        android:background="@android:color/white"-->
+<!--        android:padding="12dp"/>-->
+</RelativeLayout>
