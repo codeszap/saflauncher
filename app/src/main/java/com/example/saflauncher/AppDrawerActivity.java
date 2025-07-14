@@ -1,36 +1,32 @@
 package com.example.saflauncher;
 
-import android.annotation.TargetApi;
+import android.app.AppOpsManager;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
+import android.content.Context;
 import android.content.Intent;
-import android.content.pm.LauncherApps;
-import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
-import android.content.pm.ShortcutInfo;
+import android.content.pm.*;
+import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.UserHandle;
-import android.util.Log;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
-import android.widget.GridView;
-import android.widget.LinearLayout;
-import android.widget.SearchView;
-import android.widget.Toast;
+import android.widget.*;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 
 public class AppDrawerActivity extends AppCompatActivity {
 
     private List<AppInfo> allApps = new ArrayList<>();
+    private List<AppInfo> recentApps = new ArrayList<>();
     private AppListAdapter adapter;
     private GridView appGrid;
-    private String lastShortcutShownForPackage = "";
     private SearchView searchView;
     private InputMethodManager imm;
 
@@ -41,97 +37,50 @@ public class AppDrawerActivity extends AppCompatActivity {
 
         appGrid = findViewById(R.id.app_grid);
         searchView = findViewById(R.id.search_view);
-        LinearLayout shortcutCard = findViewById(R.id.shortcut_card);
         imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
 
+        // Remove underline bg
+        int plateId = searchView.getContext().getResources()
+                .getIdentifier("android:id/search_plate", null, null);
+        View searchPlate = searchView.findViewById(plateId);
+        if (searchPlate != null) {
+            searchPlate.setBackgroundColor(Color.TRANSPARENT);
+        }
+
+        // Permission
+        requestUsageAccessPermission();
+
+        // Load data
         loadApps();
+        loadRecentApps();
 
         adapter = new AppListAdapter(this, allApps);
         appGrid.setAdapter(adapter);
 
+        // All Apps click
         appGrid.setOnItemClickListener((parent, view, position, id) -> {
-            AppInfo selectedApp = (AppInfo) adapter.getItem(position);
-            if (selectedApp != null) {
-                Toast.makeText(AppDrawerActivity.this, "Opening: " + selectedApp.label, Toast.LENGTH_SHORT).show();
-
-                Intent launchIntent = getPackageManager().getLaunchIntentForPackage(selectedApp.packageName);
-                if (launchIntent != null) startActivity(launchIntent);
-
-                // Shortcut card for API >= 25
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
-                    showShortcutCardForApp(selectedApp);
-                }
-
-                // 🔥 Re-focus search bar after app click
-                focusSearchBar();
+            AppInfo app = (AppInfo) adapter.getItem(position);
+            if (app != null) {
+                Intent intent = getPackageManager().getLaunchIntentForPackage(app.packageName);
+                if (intent != null) startActivity(intent);
             }
         });
 
-
-
+        // Search filtering
         searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override public boolean onQueryTextSubmit(String query) { return false; }
 
             @Override
             public boolean onQueryTextChange(String newText) {
                 adapter.filter(newText.toLowerCase(Locale.ROOT));
-
-                List<AppInfo> filtered = adapter.getFilteredList();
-                if (filtered.size() == 1) {
-                    AppInfo matchedApp = filtered.get(0);
-
-                    if (!matchedApp.packageName.equals(lastShortcutShownForPackage)) {
-                        lastShortcutShownForPackage = matchedApp.packageName;
-
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
-                            List<ShortcutInfo> shortcuts = getShortcutsForPackage(matchedApp.packageName);
-                            List<ShortcutInfoModel> models = new ArrayList<>();
-                            LauncherApps launcherApps = (LauncherApps) getSystemService(LAUNCHER_APPS_SERVICE);
-
-                            for (ShortcutInfo s : shortcuts) {
-                                CharSequence shortLabel = s.getShortLabel();
-                                Intent intent = s.getIntent();
-
-                                if (intent == null) {
-                                    Intent[] intents = null;
-                                    try {
-                                        intents = s.getIntents();
-                                    } catch (Exception e) {
-                                        intents = null;
-                                    }
-
-                                    if (intents != null && intents.length > 0) {
-                                        intent = intents[0];
-                                    }
-                                }
-
-                                Drawable icon = null;
-                                if (launcherApps != null) {
-                                    icon = launcherApps.getShortcutIconDrawable(s, getResources().getDisplayMetrics().densityDpi);
-                                }
-
-                                if (shortLabel != null) {
-                                    models.add(new ShortcutInfoModel(matchedApp.label, shortLabel, icon, intent));
-                                    Log.d("SAFDebug", "Shortcut: " + shortLabel + " | HasIntent: " + (intent != null));
-                                }
-                            }
-
-                            showShortcutCard(models);
-                        }
-                    }
-                } else {
-                    lastShortcutShownForPackage = "";
-                    findViewById(R.id.shortcut_card).setVisibility(View.GONE);
-
-                    // 🔥 No match → refocus search
-                    focusSearchBar();
-                }
-
                 return true;
             }
         });
 
-        // 🔥 Auto focus search on launch
+        // Load recent into horizontal row
+        LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
+        loadRecentAppsIntoView(recentContainer);
+
         focusSearchBar();
     }
 
@@ -144,134 +93,107 @@ public class AppDrawerActivity extends AppCompatActivity {
         for (ResolveInfo info : apps) {
             String label = info.loadLabel(pm).toString();
             String packageName = info.activityInfo.packageName;
-            AppInfo app = new AppInfo(label, info.loadIcon(pm), packageName);
-            allApps.add(app);
+            Drawable icon = info.loadIcon(pm);
+            allApps.add(new AppInfo(label, icon, packageName));
+        }
+    }
+
+    private void loadRecentApps() {
+        recentApps.clear();
+        UsageStatsManager usm = (UsageStatsManager) getSystemService(USAGE_STATS_SERVICE);
+        long now = System.currentTimeMillis();
+
+        List<UsageStats> stats = usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                now - 1000 * 60 * 60 * 24,
+                now
+        );
+
+        if (stats == null || stats.isEmpty()) return;
+
+        Collections.sort(stats, (a, b) -> Long.compare(b.getLastTimeUsed(), a.getLastTimeUsed()));
+        Set<String> added = new HashSet<>();
+
+        for (UsageStats us : stats) {
+            String pkg = us.getPackageName();
+            if (added.contains(pkg)) continue;
+
+            try {
+                ApplicationInfo appInfo = getPackageManager().getApplicationInfo(pkg, 0);
+                if (getPackageManager().getLaunchIntentForPackage(pkg) != null) {
+                    String label = getPackageManager().getApplicationLabel(appInfo).toString();
+                    Drawable icon = getPackageManager().getApplicationIcon(appInfo);
+                    recentApps.add(new AppInfo(label, icon, pkg));
+                    added.add(pkg);
+                }
+            } catch (Exception ignored) {}
+
+            if (recentApps.size() >= 8) break;
+        }
+    }
+
+    private void loadRecentAppsIntoView(LinearLayout container) {
+        container.removeAllViews();
+
+        for (AppInfo app : recentApps) {
+            LinearLayout itemLayout = new LinearLayout(this);
+            itemLayout.setOrientation(LinearLayout.VERTICAL);
+            itemLayout.setPadding(16, 8, 16, 8);
+            itemLayout.setGravity(Gravity.CENTER);
+
+            ImageView iconView = new ImageView(this);
+            iconView.setImageDrawable(app.icon);
+            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(100, 100);
+            iconView.setLayoutParams(iconParams);
+
+            TextView labelView = new TextView(this);
+            labelView.setText(app.label);
+            labelView.setTextColor(Color.WHITE);
+            labelView.setMaxLines(1);
+            labelView.setEllipsize(TextUtils.TruncateAt.END);
+            labelView.setTextSize(12);
+            labelView.setGravity(Gravity.CENTER);
+
+            itemLayout.addView(iconView);
+            itemLayout.addView(labelView);
+
+            itemLayout.setOnClickListener(v -> {
+                Intent intent = getPackageManager().getLaunchIntentForPackage(app.packageName);
+                if (intent != null) startActivity(intent);
+            });
+
+            container.addView(itemLayout);
+        }
+    }
+
+    private void requestUsageAccessPermission() {
+        if (!hasUsageAccessPermission()) {
+            Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+            startActivity(intent);
+            Toast.makeText(this, "Please allow Usage Access for recent apps", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean hasUsageAccessPermission() {
+        AppOpsManager appOps = (AppOpsManager) getSystemService(Context.APP_OPS_SERVICE);
+        int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(), getPackageName());
+        return mode == AppOpsManager.MODE_ALLOWED;
+    }
+
+    private void focusSearchBar() {
+        if (searchView != null) {
+            searchView.setIconified(false);
+            searchView.requestFocus();
+            if (imm != null) {
+                imm.showSoftInput(searchView.findFocus(), InputMethodManager.SHOW_IMPLICIT);
+            }
         }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-
-        // 🔥 Clear the search text
-        if (searchView != null) {
-            searchView.setQuery("", false);
-            searchView.clearFocus();
-        }
-
-        // 🔥 Hide shortcut card
-        findViewById(R.id.shortcut_card).setVisibility(View.GONE);
-
-        // 🔥 Re-focus search bar with keyboard
         focusSearchBar();
-    }
-
-
-    private void showShortcutCardForApp(AppInfo app) {
-        List<ShortcutInfo> shortcuts = getShortcutsForPackage(app.packageName);
-        List<ShortcutInfoModel> models = new ArrayList<>();
-        LauncherApps launcherApps = (LauncherApps) getSystemService(LAUNCHER_APPS_SERVICE);
-
-        for (ShortcutInfo s : shortcuts) {
-            CharSequence shortLabel = s.getShortLabel();
-            Intent intent = s.getIntent();
-
-            if (intent == null) {
-                Intent[] intents = s.getIntents();
-                if (intents != null && intents.length > 0) {
-                    intent = intents[0];
-                }
-            }
-
-            Drawable icon = null;
-            if (launcherApps != null) {
-                icon = launcherApps.getShortcutIconDrawable(s, getResources().getDisplayMetrics().densityDpi);
-            }
-
-            if (shortLabel != null) {
-                models.add(new ShortcutInfoModel(app.label, shortLabel, icon, intent));
-            }
-        }
-
-        showShortcutCard(models);
-    }
-
-    @TargetApi(Build.VERSION_CODES.N_MR1)
-    private List<ShortcutInfo> getShortcutsForPackage(String packageName) {
-        List<ShortcutInfo> result = new ArrayList<>();
-        LauncherApps launcherApps = (LauncherApps) getSystemService(LAUNCHER_APPS_SERVICE);
-
-        if (launcherApps != null) {
-            List<UserHandle> profiles = launcherApps.getProfiles();
-            for (UserHandle profile : profiles) {
-                List<ShortcutInfo> shortcuts = launcherApps.getShortcuts(
-                        new LauncherApps.ShortcutQuery()
-                                .setPackage(packageName)
-                                .setQueryFlags(
-                                        LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC |
-                                                LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST |
-                                                LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
-                                ),
-                        profile
-                );
-
-                Log.d("SAFDebug", "Shortcuts found: " + (shortcuts != null ? shortcuts.size() : 0));
-
-                if (shortcuts != null) {
-                    for (ShortcutInfo s : shortcuts) {
-                        Log.d("SAFDebug", "Shortcut: " + s.getShortLabel());
-                        result.add(s);
-                    }
-                }
-            }
-        } else {
-            Log.d("SAFDebug", "LauncherApps null");
-        }
-
-        return result;
-    }
-
-    private void showShortcutCard(List<ShortcutInfoModel> shortcuts) {
-        LinearLayout cardLayout = findViewById(R.id.shortcut_card);
-        cardLayout.removeAllViews();
-
-        if (shortcuts.isEmpty()) {
-            cardLayout.setVisibility(View.GONE);
-            return;
-        }
-
-        cardLayout.setVisibility(View.VISIBLE);
-
-        for (ShortcutInfoModel shortcut : shortcuts) {
-            Button btn = new Button(this);
-            btn.setText(shortcut.shortLabel);
-            if (shortcut.icon != null) {
-                btn.setCompoundDrawablesWithIntrinsicBounds(null, shortcut.icon, null, null);
-            }
-
-            btn.setOnClickListener(v -> {
-                if (shortcut.intent != null) {
-                    startActivity(shortcut.intent);
-                } else {
-                    Toast.makeText(this, "This shortcut can't be opened.", Toast.LENGTH_SHORT).show();
-                }
-            });
-
-            btn.setEnabled(shortcut.intent != null);
-            btn.setAlpha(shortcut.intent != null ? 1f : 0.5f);
-
-            cardLayout.addView(btn);
-        }
-    }
-
-    private void focusSearchBar() {
-        if (searchView != null) {
-            searchView.setIconified(false); // Expand if collapsed
-            searchView.requestFocus();
-
-            if (imm != null) {
-                imm.showSoftInput(searchView.findFocus(), InputMethodManager.SHOW_IMPLICIT);
-            }
-        }
     }
 }
