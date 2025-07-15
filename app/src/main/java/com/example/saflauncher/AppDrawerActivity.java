@@ -3,18 +3,25 @@ package com.example.saflauncher;
 import android.app.AppOpsManager;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.*;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.UserHandle;
+import android.provider.ContactsContract;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
@@ -22,6 +29,8 @@ import android.widget.*;
 
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -35,6 +44,10 @@ public class AppDrawerActivity extends AppCompatActivity {
     private SearchView searchView;
     private InputMethodManager imm;
 
+    private float y1, y2;
+    private final int MIN_DISTANCE = 150; // Minimum distance to detect swipe
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -44,7 +57,6 @@ public class AppDrawerActivity extends AppCompatActivity {
         searchView = findViewById(R.id.search_view);
         imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
 
-        // Remove underline from SearchView
         int plateId = searchView.getContext().getResources()
                 .getIdentifier("android:id/search_plate", null, null);
         View searchPlate = searchView.findViewById(plateId);
@@ -53,55 +65,148 @@ public class AppDrawerActivity extends AppCompatActivity {
         }
 
         requestUsageAccessPermission();
-        loadApps();
-        loadRecentApps();
 
-        adapter = new AppListAdapter(this, allApps);
-        allAppsRecycler.setLayoutManager(new GridLayoutManager(this, 5)); // 4 columns
-        allAppsRecycler.setAdapter(adapter);
+        // 🧠 Load all apps in background to avoid UI freeze
+        new Thread(() -> {
+            loadApps();
 
+            runOnUiThread(() -> {
+                SharedPreferences prefs = getSharedPreferences("saf_launcher_prefs", MODE_PRIVATE);
+                int columnCount = prefs.getInt("grid_column_count", 5);
+                int iconSize = prefs.getInt("grid_icon_size", 100); // default size
+
+                allAppsRecycler.setLayoutManager(new GridLayoutManager(AppDrawerActivity.this, columnCount));
+
+// Pass iconSize to adapter
+                adapter = new AppListAdapter(AppDrawerActivity.this, allApps, iconSize);
+                allAppsRecycler.setAdapter(adapter);
+
+            });
+        }).start();
+
+        // 🕒 Delay recent apps load slightly to avoid initial UI blocking
+        new Handler().postDelayed(() -> {
+            loadRecentApps();
+            LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
+            loadRecentAppsIntoView(recentContainer);
+        }, 300);
+
+        // 🔐 Ask contact permission if not given
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CONTACTS)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{android.Manifest.permission.READ_CONTACTS},
+                    101);
+        }
+
+        // 🔍 Setup search bar
+        setupSearchView();
+
+        // 🎯 Focus search bar & load empty recent container first
+        LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
+        recentContainer.removeAllViews();
+        focusSearchBar();
+    }
+
+    private void setupSearchView() {
         searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override public boolean onQueryTextSubmit(String query) { return false; }
 
             @Override
             public boolean onQueryTextChange(String newText) {
-                adapter.filter(newText.toLowerCase(Locale.ROOT));
+                if (adapter != null)
+                    adapter.filter(newText.toLowerCase(Locale.ROOT));
 
-                // 🔥 Hide/show recent apps and divider based on search text
+                TextView appLabel = findViewById(R.id.app_label);
+
+                if (adapter != null) {
+                    List<AppInfo> filtered = adapter.getFilteredList();
+                    appLabel.setVisibility(filtered.isEmpty() ? View.GONE : View.VISIBLE);
+
+                    if (filtered.size() == 1) {
+                        showShortcutCard(filtered.get(0));
+                    } else {
+                        hideDynamicViews();
+                    }
+                }
+
+
                 LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
                 View divider = ((ViewGroup) recentContainer.getParent()).findViewById(R.id.recent_divider);
 
-                if (TextUtils.isEmpty(newText.trim())) {
-                    recentContainer.setVisibility(View.VISIBLE);
-                    if (divider != null) divider.setVisibility(View.VISIBLE);
-                } else {
-                    recentContainer.setVisibility(View.GONE);
-                    if (divider != null) divider.setVisibility(View.GONE);
+                boolean empty = TextUtils.isEmpty(newText.trim());
+                recentContainer.setVisibility(empty ? View.VISIBLE : View.GONE);
+                if (divider != null) divider.setVisibility(empty ? View.VISIBLE : View.GONE);
+
+                if (adapter != null) {
+                    List<AppInfo> filtered = adapter.getFilteredList();
+                    if (filtered.size() == 1) {
+                        showShortcutCard(filtered.get(0));
+                    } else {
+                        hideDynamicViews();
+                    }
                 }
 
-                List<AppInfo> filtered = adapter.getFilteredList();
-                if (filtered.size() == 1) {
-                    AppInfo matchedApp = filtered.get(0);
-                    showShortcutCard(matchedApp);
-                    //Hide show google, youtube, etc. search row
-
-                 //   showSearchWithRow(matchedApp.label);
-                } else {
-                    findViewById(R.id.shortcut_card).setVisibility(View.GONE);
-                    findViewById(R.id.search_with_label).setVisibility(View.GONE);
-                    findViewById(R.id.search_with_row).setVisibility(View.GONE);
-                }
-
+                List<ContactInfo> matchingContacts = getMatchingContacts(newText);
+                updateContactResults(matchingContacts);
                 return true;
             }
-
-
         });
-
-        LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
-        loadRecentAppsIntoView(recentContainer);
-        focusSearchBar();
     }
+
+    private void updateContactResults(List<ContactInfo> contacts) {
+        LinearLayout contactLayout = findViewById(R.id.contact_results);
+        TextView contactLabel = findViewById(R.id.contact_label);
+
+        contactLayout.removeAllViews();
+
+        if (!contacts.isEmpty()) {
+            contactLayout.setVisibility(View.VISIBLE);
+            contactLabel.setVisibility(View.VISIBLE);
+
+            for (ContactInfo c : contacts) {
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(16, 16, 16, 16);
+
+                ImageView icon = new ImageView(this);
+                icon.setImageResource(android.R.drawable.ic_menu_call);
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(60, 60);
+                iconParams.setMargins(0, 0, 24, 0);
+                icon.setLayoutParams(iconParams);
+
+                TextView tv = new TextView(this);
+                tv.setText(c.name + "   " + c.number);
+                tv.setTextColor(Color.WHITE);
+                tv.setTextSize(14);
+
+                row.addView(icon);
+                row.addView(tv);
+
+                row.setOnClickListener(v -> {
+                    Intent i = new Intent(Intent.ACTION_DIAL);
+                    i.setData(Uri.parse("tel:" + c.number));
+                    startActivity(i);
+                });
+
+                contactLayout.addView(row);
+            }
+        } else {
+            contactLayout.setVisibility(View.GONE);
+            contactLabel.setVisibility(View.GONE);
+        }
+    }
+
+    private void hideDynamicViews() {
+        findViewById(R.id.shortcut_card).setVisibility(View.GONE);
+        findViewById(R.id.search_with_label).setVisibility(View.GONE);
+        findViewById(R.id.search_with_row).setVisibility(View.GONE);
+        findViewById(R.id.contact_label).setVisibility(View.GONE);
+        findViewById(R.id.contact_results).setVisibility(View.GONE);
+        findViewById(R.id.app_label).setVisibility(View.GONE);
+    }
+
 
     private void loadApps() {
         PackageManager pm = getPackageManager();
@@ -157,7 +262,25 @@ public class AppDrawerActivity extends AppCompatActivity {
     private void loadRecentAppsIntoView(LinearLayout container) {
         container.removeAllViews();
 
-        for (AppInfo app : recentApps) {
+        SharedPreferences prefs = getSharedPreferences("saf_launcher_prefs", MODE_PRIVATE);
+        int iconSize = prefs.getInt("grid_icon_size", 100);
+        int appsPerRow = 2; // 👉 Adjust this for 3 or 4 per row
+
+        LinearLayout currentRow = null;
+
+        for (int i = 0; i < recentApps.size(); i++) {
+            if (i % appsPerRow == 0) {
+                // 🔃 New row
+                currentRow = new LinearLayout(this);
+                currentRow.setOrientation(LinearLayout.HORIZONTAL);
+                currentRow.setGravity(Gravity.CENTER_HORIZONTAL);
+                currentRow.setPadding(0, 16, 0, 16);
+                container.addView(currentRow);
+            }
+
+            AppInfo app = recentApps.get(i);
+
+            // 📦 App item
             LinearLayout itemLayout = new LinearLayout(this);
             itemLayout.setOrientation(LinearLayout.VERTICAL);
             itemLayout.setPadding(16, 8, 16, 8);
@@ -165,7 +288,7 @@ public class AppDrawerActivity extends AppCompatActivity {
 
             ImageView iconView = new ImageView(this);
             iconView.setImageDrawable(app.icon);
-            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(100, 100);
+            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(iconSize, iconSize);
             iconView.setLayoutParams(iconParams);
 
             TextView labelView = new TextView(this);
@@ -184,7 +307,8 @@ public class AppDrawerActivity extends AppCompatActivity {
                 if (intent != null) startActivity(intent);
             });
 
-            container.addView(itemLayout);
+            // 🔄 Add to current row
+            currentRow.addView(itemLayout);
         }
     }
 
@@ -338,9 +462,84 @@ public class AppDrawerActivity extends AppCompatActivity {
         }
     }
 
+    private List<ContactInfo> getMatchingContacts(String query) {
+        List<ContactInfo> contacts = new ArrayList<>();
+        ContentResolver cr = getContentResolver();
+
+        Uri uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI;
+        String[] projection = {
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+        };
+
+        String selection = ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ? OR " +
+                ContactsContract.CommonDataKinds.Phone.NUMBER + " LIKE ?";
+        String[] selectionArgs = { "%" + query + "%", "%" + query + "%" };
+
+        Cursor cursor = cr.query(uri, projection, selection, selectionArgs, null);
+        if (cursor != null) {
+            while (cursor.moveToNext()) {
+                String name = cursor.getString(0);
+                String number = cursor.getString(1);
+                contacts.add(new ContactInfo(name, number));
+            }
+            cursor.close();
+        }
+
+        return contacts;
+    }
+
+
     @Override
     protected void onResume() {
         super.onResume();
+
+        // Clear search text
+        if (searchView != null) {
+            searchView.setQuery("", false); // clear text
+            searchView.clearFocus(); // just to reset
+            searchView.setIconified(false); // force focus
+        }
+
+        // Hide shortcut card & others
+        findViewById(R.id.shortcut_card).setVisibility(View.GONE);
+        findViewById(R.id.search_with_label).setVisibility(View.GONE);
+        findViewById(R.id.search_with_row).setVisibility(View.GONE);
+        findViewById(R.id.contact_results).setVisibility(View.GONE);
+        findViewById(R.id.contact_label).setVisibility(View.GONE);
+        findViewById(R.id.app_label).setVisibility(View.GONE);
+
+
+        // Show recent apps + divider again
+        LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
+        View divider = ((ViewGroup) recentContainer.getParent()).findViewById(R.id.recent_divider);
+        recentContainer.setVisibility(View.VISIBLE);
+        if (divider != null) divider.setVisibility(View.VISIBLE);
+
+        // Refocus the search bar
         focusSearchBar();
     }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                y1 = event.getY();
+                break;
+            case MotionEvent.ACTION_UP:
+                y2 = event.getY();
+                if (y2 - y1 > MIN_DISTANCE) {
+                    // Swipe down detected
+                    finish(); // 👈 Close the AppDrawer
+                    overridePendingTransition(0, 0);
+                    return true;
+                }
+                break;
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+
 }
+
+

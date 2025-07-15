@@ -5,22 +5,21 @@
     <!-- Permissions -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.READ_WALLPAPER_INTERNAL" />
-    <uses-permission android:name="android.permission.REQUEST_SHORTCUTS"/>
+    <uses-permission android:name="android.permission.REQUEST_SHORTCUTS" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.VIBRATE" />
-
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT"/>
+    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.READ_SMS" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-
 
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
-    <!-- Android 11+ app visibility -->
+    <!-- App visibility for Android 11+ -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -45,9 +44,13 @@
 
         <uses-library android:name="android.software.launcher.apps" android:required="false" />
 
+        <!-- Activities -->
         <activity android:name=".MainActivity" android:exported="true" />
-        <activity android:name=".AppDrawerActivity" />
-
+        <activity android:name=".AppDrawerActivity" android:exported="true" />
+        <activity android:name=".LauncherSettingsActivity" android:exported="true" />
+        <activity android:name=".GestureSettingsActivity" android:exported="true" />
+        <activity android:name=".AliasSettingsActivity" />
+        <activity android:name=".GridLayoutActivity" />
         <activity
             android:name=".HomeActivity"
             android:exported="true"
@@ -57,8 +60,36 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.LAUNCHER" /> <!-- optional for testing -->
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Accessibility Service -->
+        <service
+            android:name=".MyAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Device Admin Receiver -->
+        <receiver
+            android:name=".MyDeviceAdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true"> <!-- ✅ FIXED here -->
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_receiver" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+
     </application>
 </manifest>

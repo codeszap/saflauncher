@@ -2,8 +2,11 @@ package com.example.saflauncher;
 
 import android.app.AlertDialog;
 import android.app.WallpaperManager;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
@@ -22,9 +25,10 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import java.io.FileInputStream;
+import java.util.List;
+
 import android.Manifest;
 import android.os.Vibrator;
-
 
 public class HomeActivity extends AppCompatActivity {
 
@@ -33,9 +37,14 @@ public class HomeActivity extends AppCompatActivity {
     private final int MIN_DISTANCE = 150;
     private final long LONG_PRESS_TIME = 500;
     private boolean drawerOpened = false;
-
     private RelativeLayout rootLayout;
+
     private static final int REQUEST_STORAGE_PERMISSION = 1;
+    private static final int REQUEST_CODE_ENABLE_ADMIN = 1;
+
+    private DevicePolicyManager devicePolicyManager;
+    private ComponentName compName;
+    private long lastTapTime = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,9 +52,16 @@ public class HomeActivity extends AppCompatActivity {
         setContentView(R.layout.activity_home);
 
         rootLayout = findViewById(R.id.home_root);
-//        ImageView btnDrawer = findViewById(R.id.btn_drawer);
-//
-//        btnDrawer.setOnClickListener(v -> openDrawer());
+
+        devicePolicyManager = (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
+        compName = new ComponentName(this, MyDeviceAdminReceiver.class);
+
+        if (!devicePolicyManager.isAdminActive(compName)) {
+            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, compName);
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Double tap to lock screen needs admin permission.");
+            startActivityForResult(intent, REQUEST_CODE_ENABLE_ADMIN);
+        }
 
         rootLayout.setOnDragListener((view, dragEvent) -> {
             switch (dragEvent.getAction()) {
@@ -65,13 +81,38 @@ public class HomeActivity extends AppCompatActivity {
             return true;
         });
 
-        checkStoragePermission(); // Load wallpaper once at startup
+        checkStoragePermission();
+
+        if (!isAccessibilityServiceEnabled()) {
+            Toast.makeText(this, "⚠️ Enable Accessibility for Notification Swipe", Toast.LENGTH_LONG).show();
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
+        }
+    }
+
+    private boolean isDefaultLauncher() {
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.addCategory(Intent.CATEGORY_HOME);
+        PackageManager pm = getPackageManager();
+        ResolveInfo resolveInfo = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
+        return resolveInfo != null && resolveInfo.activityInfo.packageName.equals(getPackageName());
+    }
+
+    private void promptSetAsDefaultLauncher() {
+        new AlertDialog.Builder(this)
+                .setTitle("Set SAF Launcher as Default")
+                .setMessage("Please set SAF Launcher as the default home app.")
+                .setPositiveButton("Set Now", (dialog, which) -> {
+                    Intent intent = new Intent(Settings.ACTION_HOME_SETTINGS);
+                    startActivity(intent);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void checkStoragePermission() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
-
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
                     REQUEST_STORAGE_PERMISSION);
@@ -82,16 +123,14 @@ public class HomeActivity extends AppCompatActivity {
 
     private void vibrate() {
         Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
-
         if (vibrator != null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator.vibrate(android.os.VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE));
+                vibrator.vibrate(VibrationEffect.createOneShot(60, VibrationEffect.DEFAULT_AMPLITUDE));
             } else {
-                vibrator.vibrate(30); // Deprecated but still works in older Android
+                vibrator.vibrate(30);
             }
         }
     }
-
 
     private void loadWallpaper() {
         try {
@@ -109,7 +148,7 @@ public class HomeActivity extends AppCompatActivity {
             }
 
             if (wallpaperDrawable == null) {
-                wallpaperDrawable = wallpaperManager.getDrawable(); // fallback
+                wallpaperDrawable = wallpaperManager.getDrawable();
             }
 
             if (wallpaperDrawable != null) {
@@ -128,7 +167,7 @@ public class HomeActivity extends AppCompatActivity {
         rootLayout.post(() -> {
             Intent intent = new Intent(this, AppDrawerActivity.class);
             startActivity(intent);
-            overridePendingTransition(0, 0); // Fastest transition
+            overridePendingTransition(1, 1);
         });
     }
 
@@ -139,18 +178,29 @@ public class HomeActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+        long currentTime = System.currentTimeMillis();
+
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            if (currentTime - lastTapTime < 300) {
+                lockScreen();
+                return true;
+            }
+            lastTapTime = currentTime;
+        }
+
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 y1 = event.getY();
-                touchDownTime = System.currentTimeMillis();
+                touchDownTime = currentTime;
                 drawerOpened = false;
                 break;
 
             case MotionEvent.ACTION_UP:
                 y2 = event.getY();
-                long pressDuration = System.currentTimeMillis() - touchDownTime;
+                long pressDuration = currentTime - touchDownTime;
 
                 if (pressDuration > LONG_PRESS_TIME) {
+                    vibrate();
                     showHomeOptionsMenu();
                     return true;
                 }
@@ -161,23 +211,70 @@ public class HomeActivity extends AppCompatActivity {
                     openDrawer();
                     return true;
                 }
+
+                if (y2 - y1 > MIN_DISTANCE) {
+                    if (MyAccessibilityService.instance != null) {
+                        MyAccessibilityService.instance.triggerSwipeDown();
+                    } else {
+                        Toast.makeText(this, "Accessibility Not Enabled!", Toast.LENGTH_SHORT).show();
+                    }
+                    return true;
+                } else if (y1 - y2 > MIN_DISTANCE) {
+                    drawerOpened = true;
+                    vibrate();
+                    openDrawer();
+                    return true;
+                }
+
                 break;
         }
+
         return super.dispatchTouchEvent(event);
+    }
+
+    private void lockScreen() {
+        if (devicePolicyManager.isAdminActive(compName)) {
+            devicePolicyManager.lockNow();
+        } else {
+            Toast.makeText(this, "Please enable device admin", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showHomeOptionsMenu() {
         String[] options = {"Change Wallpaper", "Launcher Settings", "Add Widget"};
-
         new AlertDialog.Builder(this)
                 .setTitle("Home Options")
                 .setItems(options, (dialog, which) -> {
                     switch (which) {
                         case 0: openWallpaperPicker(); break;
-                        case 1: Toast.makeText(this, "Settings Coming Soon!", Toast.LENGTH_SHORT).show(); break;
-                        case 2: Toast.makeText(this, "Add Widget Coming Soon!", Toast.LENGTH_SHORT).show(); break;
+                        case 1:
+                            Intent settingsIntent = new Intent(this, LauncherSettingsActivity.class);
+                            startActivity(settingsIntent);
+                            break;
+                        case 2:
+                            Toast.makeText(this, "Add Widget Coming Soon!", Toast.LENGTH_SHORT).show(); break;
                     }
                 }).show();
+    }
+
+    private void expandNotificationBar() {
+        if (MyAccessibilityService.instance != null) {
+            MyAccessibilityService.instance.triggerSwipeDown();
+            Toast.makeText(this, "📥 Notification Panel Opening...", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "⚠️ Enable Accessibility Service First", Toast.LENGTH_LONG).show();
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
+        }
+    }
+
+    private boolean isAccessibilityServiceEnabled() {
+        String service = getPackageName() + "/" + MyAccessibilityService.class.getName();
+        String enabledServices = Settings.Secure.getString(
+                getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        );
+        return enabledServices != null && enabledServices.contains(service);
     }
 
     private void openWallpaperPicker() {
@@ -192,7 +289,6 @@ public class HomeActivity extends AppCompatActivity {
     private void addShortcutToHome(AppInfo app, float x, float y) {
         ImageView shortcut = new ImageView(this);
         shortcut.setImageDrawable(app.icon);
-
         RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(140, 140);
         params.leftMargin = (int) x - 70;
         params.topMargin = (int) y - 70;
@@ -213,7 +309,6 @@ public class HomeActivity extends AppCompatActivity {
 
     private void showShortcutOptions(AppInfo app, View shortcutView) {
         String[] options = {"App Info", "Uninstall", "Remove from Home"};
-
         new AlertDialog.Builder(this)
                 .setTitle(app.label)
                 .setItems(options, (dialog, which) -> {
@@ -239,13 +334,32 @@ public class HomeActivity extends AppCompatActivity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
                                            @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
         if (requestCode == REQUEST_STORAGE_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 loadWallpaper();
             } else {
                 Toast.makeText(this, "Storage permission denied", Toast.LENGTH_SHORT).show();
             }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        // ✅ Prompt to set as default launcher if not already
+        if (!isDefaultLauncher()) {
+            promptSetAsDefaultLauncher();
+        }
+
+        if (isAccessibilityServiceEnabled()) {
+            if (MyAccessibilityService.instance == null) {
+                Toast.makeText(this, "🔄 Trying to reconnect Accessibility...", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            Toast.makeText(this, "⚠️ Accessibility Disabled. Please enable", Toast.LENGTH_LONG).show();
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
         }
     }
 }

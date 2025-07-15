@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">SAF LAUNCHER</string>
+    <string name="accessibility_desc">Used to control swipe gestures</string>
+
 </resources>

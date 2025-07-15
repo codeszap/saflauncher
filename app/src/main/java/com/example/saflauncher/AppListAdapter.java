@@ -2,32 +2,35 @@ package com.example.saflauncher;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
-import android.view.LayoutInflater;
-import android.view.MotionEvent;
-import android.view.View;
-import android.view.ViewGroup;
+import android.view.*;
 import android.widget.*;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.recyclerview.widget.RecyclerView;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 public class AppListAdapter extends RecyclerView.Adapter<AppListAdapter.ViewHolder> {
 
     private final Context context;
     private final List<AppInfo> originalApps;
     private final List<AppInfo> filteredApps;
+    private final int iconSize;
+    private final String iconShape;
 
-    public AppListAdapter(Context context, List<AppInfo> apps) {
+    public AppListAdapter(Context context, List<AppInfo> apps, int iconSize) {
         this.context = context;
         this.originalApps = new ArrayList<>(apps);
         this.filteredApps = new ArrayList<>(apps);
+        this.iconSize = iconSize;
+
+        SharedPreferences prefs = context.getSharedPreferences("saf_launcher_prefs", Context.MODE_PRIVATE);
+        this.iconShape = prefs.getString("icon_shape", "Square");
     }
 
     public List<AppInfo> getFilteredList() {
@@ -48,6 +51,29 @@ public class AppListAdapter extends RecyclerView.Adapter<AppListAdapter.ViewHold
         holder.iconView.setImageDrawable(app.icon);
         holder.labelView.setText(app.label);
 
+        // 🖼️ Set icon size
+        ViewGroup.LayoutParams params = holder.iconView.getLayoutParams();
+        params.width = iconSize;
+        params.height = iconSize;
+        holder.iconView.setLayoutParams(params);
+
+        // 🟠 Apply icon shape
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            switch (iconShape) {
+                case "Rounded":
+                    holder.iconView.setBackgroundResource(R.drawable.rounded);
+                    holder.iconView.setClipToOutline(true);
+                    break;
+                case "Circle":
+                    holder.iconView.setBackgroundResource(R.drawable.circle);
+                    holder.iconView.setClipToOutline(true);
+                    break;
+                default:
+                    holder.iconView.setBackground(null);
+                    holder.iconView.setClipToOutline(false);
+            }
+        }
+
         holder.itemView.setOnClickListener(v -> {
             Intent launchIntent = context.getPackageManager()
                     .getLaunchIntentForPackage(app.packageName);
@@ -59,44 +85,6 @@ public class AppListAdapter extends RecyclerView.Adapter<AppListAdapter.ViewHold
         holder.itemView.setOnLongClickListener(v -> {
             showAppOptions(app);
             return true;
-        });
-
-        holder.itemView.setOnTouchListener(new View.OnTouchListener() {
-            private long startTime = 0;
-            private boolean dragged = false;
-
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                        startTime = System.currentTimeMillis();
-                        dragged = false;
-                        return false;
-
-                    case MotionEvent.ACTION_MOVE:
-                        if (!dragged && System.currentTimeMillis() - startTime > 300) {
-                            View.DragShadowBuilder shadow = new View.DragShadowBuilder(v);
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                v.startDragAndDrop(null, shadow, app, 0);
-                            }
-                            dragged = true;
-                        }
-
-                        float y = event.getRawY();
-                        if (y > v.getRootView().getHeight() - 100) {
-                            Intent intent = new Intent(context, HomeActivity.class);
-                            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                            intent.putExtra("dragging_app_package", app.packageName);
-                            context.startActivity(intent);
-                        }
-
-                        return true;
-
-                    case MotionEvent.ACTION_UP:
-                        return false;
-                }
-                return false;
-            }
         });
     }
 
@@ -131,20 +119,17 @@ public class AppListAdapter extends RecyclerView.Adapter<AppListAdapter.ViewHold
                             infoIntent.setData(Uri.parse("package:" + app.packageName));
                             context.startActivity(infoIntent);
                             break;
-
                         case 1:
                             Intent uninstallIntent = new Intent(Intent.ACTION_DELETE);
                             uninstallIntent.setData(Uri.parse("package:" + app.packageName));
                             context.startActivity(uninstallIntent);
                             break;
-
                         case 2:
                             Intent homeIntent = new Intent(context, HomeActivity.class);
                             homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                             homeIntent.putExtra("add_to_home_package", app.packageName);
                             context.startActivity(homeIntent);
                             break;
-
                         case 3:
                             dialog.dismiss();
                             break;
