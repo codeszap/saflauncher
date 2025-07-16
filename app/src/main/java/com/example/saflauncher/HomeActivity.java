@@ -56,6 +56,8 @@ public class HomeActivity extends AppCompatActivity {
         devicePolicyManager = (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
         compName = new ComponentName(this, MyDeviceAdminReceiver.class);
 
+        preloadAppList();
+
         if (!devicePolicyManager.isAdminActive(compName)) {
             Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
             intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, compName);
@@ -167,9 +169,10 @@ public class HomeActivity extends AppCompatActivity {
         rootLayout.post(() -> {
             Intent intent = new Intent(this, AppDrawerActivity.class);
             startActivity(intent);
-            overridePendingTransition(1, 1);
+            overridePendingTransition(0, 0); // ⚡ removes animation delay
         });
     }
+
 
     @Override
     public void onBackPressed() {
@@ -231,6 +234,27 @@ public class HomeActivity extends AppCompatActivity {
 
         return super.dispatchTouchEvent(event);
     }
+
+    private void preloadAppList() {
+        new Thread(() -> {
+            PackageManager pm = getPackageManager();
+            Intent intent = new Intent(Intent.ACTION_MAIN, null);
+            intent.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> resolveInfos = pm.queryIntentActivities(intent, 0);
+
+            List<AppInfo> apps = new java.util.ArrayList<>();
+            for (ResolveInfo resolveInfo : resolveInfos) {
+                AppInfo appInfo = new AppInfo();
+                appInfo.label = resolveInfo.loadLabel(pm).toString();
+                appInfo.packageName = resolveInfo.activityInfo.packageName;
+                appInfo.icon = resolveInfo.loadIcon(pm);
+                apps.add(appInfo);
+            }
+
+            AppCache.allApps = apps;
+        }).start();
+    }
+
 
     private void lockScreen() {
         if (devicePolicyManager.isAdminActive(compName)) {

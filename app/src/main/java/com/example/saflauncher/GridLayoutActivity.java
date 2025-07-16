@@ -49,6 +49,21 @@ public class GridLayoutActivity extends AppCompatActivity {
         int savedSize = prefs.getInt("grid_icon_size", 100);
         sizeSpinner.setSelection(getIndexFromValue(sizeOptions, String.valueOf(savedSize)));
 
+
+        // 📱 Show Recent Apps Toggle
+        TextView recentLabel = new TextView(this);
+        recentLabel.setText("\nShow Recent Apps:");
+        recentLabel.setTextSize(18);
+        root.addView(recentLabel);
+
+        Switch showRecentSwitch = new Switch(this);
+        root.addView(showRecentSwitch);
+
+// 🔁 Load saved preference
+        boolean showRecent = prefs.getBoolean("show_recent_apps", true);
+        showRecentSwitch.setChecked(showRecent);
+
+
         // 🟠 Icon Shape
         TextView shapeLabel = new TextView(this);
         shapeLabel.setText("\nChoose Icon Shape:");
@@ -74,6 +89,18 @@ public class GridLayoutActivity extends AppCompatActivity {
             int iconSize = Integer.parseInt((String) sizeSpinner.getSelectedItem());
             String iconShape = (String) shapeSpinner.getSelectedItem();
 
+
+            boolean recentToggle = showRecentSwitch.isChecked(); // 👈 get user input
+
+            getSharedPreferences("saf_launcher_prefs", MODE_PRIVATE)
+                    .edit()
+                    .putInt("grid_column_count", columnCount)
+                    .putInt("grid_icon_size", iconSize)
+                    .putString("grid_icon_shape", iconShape)
+                    .putBoolean("show_recent_apps", recentToggle)  // 👈 SAVE user toggle
+                    .apply();
+
+
             // 💾 Save values
             getSharedPreferences("saf_launcher_prefs", MODE_PRIVATE)
                     .edit()
@@ -85,6 +112,8 @@ public class GridLayoutActivity extends AppCompatActivity {
             startActivity(new Intent(this, AppDrawerActivity.class));
             finish(); // optional: avoid going back here
         });
+
+
 
         setContentView(root);
     }
