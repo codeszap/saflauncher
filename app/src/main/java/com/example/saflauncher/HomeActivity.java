@@ -3,7 +3,10 @@ package com.example.saflauncher;
 import android.app.AlertDialog;
 import android.app.WallpaperManager;
 import android.app.admin.DevicePolicyManager;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -25,7 +28,10 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import java.io.FileInputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import android.Manifest;
 import android.os.Vibrator;
@@ -235,6 +241,27 @@ public class HomeActivity extends AppCompatActivity {
         return super.dispatchTouchEvent(event);
     }
 
+//    private void preloadAppList() {
+//        new Thread(() -> {
+//            PackageManager pm = getPackageManager();
+//            Intent intent = new Intent(Intent.ACTION_MAIN, null);
+//            intent.addCategory(Intent.CATEGORY_LAUNCHER);
+//            List<ResolveInfo> resolveInfos = pm.queryIntentActivities(intent, 0);
+//
+//            List<AppInfo> apps = new java.util.ArrayList<>();
+//            for (ResolveInfo resolveInfo : resolveInfos) {
+//                AppInfo appInfo = new AppInfo();
+//                appInfo.label = resolveInfo.loadLabel(pm).toString();
+//                appInfo.packageName = resolveInfo.activityInfo.packageName;
+//                appInfo.icon = resolveInfo.loadIcon(pm);
+//                apps.add(appInfo);
+//            }
+//
+//            AppCache.allApps = apps;
+//        }).start();
+//    }
+
+
     private void preloadAppList() {
         new Thread(() -> {
             PackageManager pm = getPackageManager();
@@ -242,7 +269,7 @@ public class HomeActivity extends AppCompatActivity {
             intent.addCategory(Intent.CATEGORY_LAUNCHER);
             List<ResolveInfo> resolveInfos = pm.queryIntentActivities(intent, 0);
 
-            List<AppInfo> apps = new java.util.ArrayList<>();
+            List<AppInfo> apps = new ArrayList<>();
             for (ResolveInfo resolveInfo : resolveInfos) {
                 AppInfo appInfo = new AppInfo();
                 appInfo.label = resolveInfo.loadLabel(pm).toString();
@@ -251,8 +278,38 @@ public class HomeActivity extends AppCompatActivity {
                 apps.add(appInfo);
             }
 
+            // ✅ Usage stats map
+            Map<String, Long> usageStats = getAppUsageStats();
+
+            // 🔀 Sort based on usage descending, fallback to A-Z if usage data not found
+            apps.sort((a1, a2) -> {
+                long usage1 = usageStats.getOrDefault(a1.packageName, 0L);
+                long usage2 = usageStats.getOrDefault(a2.packageName, 0L);
+                if (usage1 == usage2) {
+                    return a1.label.compareToIgnoreCase(a2.label);
+                }
+                return Long.compare(usage2, usage1); // High usage first
+            });
+
             AppCache.allApps = apps;
         }).start();
+    }
+
+    private Map<String, Long> getAppUsageStats() {
+        UsageStatsManager usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+
+        long endTime = System.currentTimeMillis();
+        long beginTime = endTime - (1000L * 60 * 60 * 24 * 7); // Last 7 days
+
+        List<UsageStats> stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime);
+
+        Map<String, Long> usageMap = new HashMap<>();
+        if (stats != null) {
+            for (UsageStats usage : stats) {
+                usageMap.put(usage.getPackageName(), usage.getTotalTimeInForeground());
+            }
+        }
+        return usageMap;
     }
 
 
@@ -367,11 +424,36 @@ public class HomeActivity extends AppCompatActivity {
         }
     }
 
+//    @Override
+//    protected void onResume() {
+//        super.onResume();
+//
+//        // 🔁 ADD THIS LINE — refresh app list every time screen resumes
+//        preloadAppList();
+//
+//        // ✅ Prompt to set as default launcher if not already
+//        if (!isDefaultLauncher()) {
+//            promptSetAsDefaultLauncher();
+//        }
+//
+//        if (isAccessibilityServiceEnabled()) {
+//            if (MyAccessibilityService.instance == null) {
+//                Toast.makeText(this, "🔄 Trying to reconnect Accessibility...", Toast.LENGTH_SHORT).show();
+//            }
+//        } else {
+//            Toast.makeText(this, "⚠️ Accessibility Disabled. Please enable", Toast.LENGTH_LONG).show();
+//            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+//            startActivity(intent);
+//        }
+//    }
+
     @Override
     protected void onResume() {
         super.onResume();
 
-        // ✅ Prompt to set as default launcher if not already
+        // 🔁 Already existing code
+        preloadAppList();
+
         if (!isDefaultLauncher()) {
             promptSetAsDefaultLauncher();
         }
@@ -385,5 +467,17 @@ public class HomeActivity extends AppCompatActivity {
             Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
             startActivity(intent);
         }
+
+        // ✅ 👉 Add this below all existing code
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Settings.canDrawOverlays(this)) {
+                startService(new Intent(this, EdgeGestureService.class));
+            } else {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+            }
+        }
     }
+
 }

@@ -23,6 +23,10 @@ public class AppListAdapter extends RecyclerView.Adapter<AppListAdapter.ViewHold
     private final int iconSize;
     private final String iconShape;
 
+    private List<AppInfo> originalList;
+    private List<AppInfo> filteredList;
+
+
     public AppListAdapter(Context context, List<AppInfo> apps, int iconSize) {
         this.context = context;
         this.originalApps = new ArrayList<>(apps);
@@ -147,4 +151,11 @@ public class AppListAdapter extends RecyclerView.Adapter<AppListAdapter.ViewHold
             labelView = itemView.findViewById(R.id.app_name);
         }
     }
+
+    public void updateList(List<AppInfo> newList) {
+        this.originalList = new ArrayList<>(newList);
+        this.filteredList = new ArrayList<>(newList);
+        notifyDataSetChanged();
+    }
+
 }

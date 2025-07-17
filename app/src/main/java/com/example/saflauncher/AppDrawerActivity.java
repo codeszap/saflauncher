@@ -379,6 +379,34 @@ public class AppDrawerActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+
+        // 🆕 Reload updated app list
+        new Thread(() -> {
+            List<AppInfo> latestApps = loadApps(); // fetch from PackageManager
+
+            runOnUiThread(() -> {
+                if (adapter != null) {
+                    adapter.updateList(latestApps); // 🔁 refresh adapter
+                }
+            });
+        }).start();
+
+        // 🔁 Reload recent apps again
+        SharedPreferences prefs = getSharedPreferences("saf_launcher_prefs", MODE_PRIVATE);
+        boolean showRecent = prefs.getBoolean("show_recent_apps", true);
+
+        LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
+        View divider = ((ViewGroup) recentContainer.getParent()).findViewById(R.id.recent_divider);
+
+        if (showRecent) {
+            loadRecentApps();
+            loadRecentAppsIntoView(recentContainer);
+        }
+
+        recentContainer.setVisibility(showRecent ? View.VISIBLE : View.GONE);
+        if (divider != null) divider.setVisibility(showRecent ? View.VISIBLE : View.GONE);
+
+        // 🧠 Optional: clear search
         if (searchView != null) {
             searchView.setQuery("", false);
             searchView.clearFocus();
@@ -386,17 +414,9 @@ public class AppDrawerActivity extends AppCompatActivity {
         }
 
         hideDynamicViews();
-
-        SharedPreferences prefs = getSharedPreferences("saf_launcher_prefs", MODE_PRIVATE);
-        boolean showRecent = prefs.getBoolean("show_recent_apps", true);
-
-        LinearLayout recentContainer = findViewById(R.id.recent_apps_container);
-        View divider = ((ViewGroup) recentContainer.getParent()).findViewById(R.id.recent_divider);
-        recentContainer.setVisibility(showRecent ? View.VISIBLE : View.GONE);
-        if (divider != null) divider.setVisibility(showRecent ? View.VISIBLE : View.GONE);
-
         focusSearchBar();
     }
+
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {

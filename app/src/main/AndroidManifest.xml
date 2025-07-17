@@ -16,6 +16,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
 
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
@@ -36,9 +40,9 @@
 
     <application
         android:allowBackup="true"
-        android:label="SAFLAUNCHER"
+        android:label="SAF LAUNCHER"
         android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.SAFLAUNCHER">
 
@@ -51,6 +55,7 @@
         <activity android:name=".GestureSettingsActivity" android:exported="true" />
         <activity android:name=".AliasSettingsActivity" />
         <activity android:name=".GridLayoutActivity" />
+
         <activity
             android:name=".HomeActivity"
             android:exported="true"
@@ -76,6 +81,10 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <service android:name=".EdgeGestureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"/>
 
         <!-- Device Admin Receiver -->
         <receiver
